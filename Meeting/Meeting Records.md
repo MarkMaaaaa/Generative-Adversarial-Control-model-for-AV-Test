@@ -198,3 +198,76 @@ netconvert --node-files=example.nod.xml --edge-files=example.edg.xml --output-fi
 - `Zeng2020[ECCV]` - "DSDNet: Deep Structured Self-driving Network"
 
 在SDV的视角预测其他车辆的行为，输出可行轨道
+
+# 2022-01-24
+
+## Review
+
+1. `Koren2019[arXiv]`----Adaptive Stress Testing for Autonomous Vehicles
+
+主要内容：使用AST找到最容易发生碰撞的场景。只考虑行人过马路时一辆车的场景。
+
+AST: 用于寻找使一种自动驾驶策略SUT发生失败的场景。将环境动作建模为MDP，可使用DRL搜索。
+
+![image-20230126112132543](mdPics/image-20230126112132543.png)
+
+![image-20230126112143340](mdPics/image-20230126112143340.png)
+
+![image-20230126112428141](mdPics/image-20230126112428141.png)
+
+AST的运行：如Fig.1，开始时solver输入初始环境状态（即BV状态）给simulator，simulator加入噪音、过滤之后输入给SUT，SUT选择行为后将状态转移概率给reward function，reward计算出每个环境action的reward，solver根据reward分别使用MCTS或DRL得到action。不断迭代推进MDP，直到发生碰撞。输出该过程中的actions，表示发生危险的事件。
+
+文中仅针对行人过马路场景设置函数细节。state参数为速度、位置，action参数为加速度、速度、位置。
+
+![image-20230126112701745](mdPics/image-20230126112701745.png)
+
+评价：1. 没有静态初始化，为动态问题，考虑了环境和AV的交互；2. 研究的场景很简单，没有车辆间交互，所以reward比较简单（参考`Feng2019[NC]`中对车辆间交互的reward设计）；3. 加入noisy、filter的思想可以采用；4. 所谓的AST框架是在MDP下环境和车辆按顺序决策
+
+2. `Corso2019[ITSC]`----Adaptive Stress Testing with Reward Augmentation for Autonomous V ehicle Validation
+
+`Koren2019[arXiv]`的延伸。
+
+主要内容：在`Koren2019[arXiv]`的基础上，为了避免重复搜索/不可避免的场景，修改reward function（加入安全策略RSS和相似度指标）。
+
+RSS：使用行人过马路为例子。主要通过车辆和行人的加速度、速度、位置计算出何时需要进行什么反应以避免碰撞，称为适当行为。
+
+目标函数：(1)为原reward，(6)为考虑RSS的reward，将关键状态集$E$(碰撞)修改为一定比例驾驶行为不适当的状态集合，目标中的距离修改为不正确的比例。(8)为考虑相似度的reward，在终止时加入与之前已发现状态的相似成本，$a$与$b$的相似度定义为将二者路径归一化之后的欧拉距离均值。
+
+![image-20230126113754034](mdPics/image-20230126113754034.png)
+
+![image-20230126113817374](mdPics/image-20230126113817374.png)
+
+![image-20230126113826063](mdPics/image-20230126113826063.png)
+
+评价：RSS设计存疑，因为我们更希望找到failure发生的场景。
+
+3. `Feng2020[IEEE]`----Testing Scenario Library Generation for Connected and Automated V ehicles: An Adaptive Framework
+
+`Feng2019[NC]`的前作，还有part 1 Methodology和part 2 Case studies。
+
+主要内容：在offline生成的场景的基础上通过实车测试得到质量更高的场景库，场景库根据实车自动驾驶模型定制，使用贝叶斯优化解决场景overweight或underweight的问题。
+
+前文主要内容：
+
+1. 通过importance sampling理论，得到给定置信度下采样次数（与方差成正比），方差与importance function相关，引入scenario criticality定义function。scenario criticality=exposure frequency*maneuver challenge. 
+2. 通过SM模型估计maneuver challenge，但是SM与CAV自身性能有差别，导致上述overweight或underweight问题。
+
+框架：以offline结果为输入，用实车测试更新SM模型和场景库。
+
+![image-20230127105322002](mdPics/image-20230127105322002.png)
+
+问题：目标是减小SM与CAV的估计差异，每次实车测试能得到一个真实值。应该尽量用少的观察值得到结果，减少实车测试。贝叶斯优化可用于此。
+
+评价：与实车测试结合的方法可以考虑。
+
+4. `Behzadan2019[IEEE]`----Adversarial Reinforcement Learning Framework for Benchmarking Collision Avoidance Mechanisms in Autonomous Vehicles
+
+主要内容：利用DRL框架训练BV，使其尽量与AV产生碰撞，用于测试AV的避撞机制。重点训练BV运动中的行为。
+
+目标函数：将BV的行为设置为action。目标是尽量让AV发生碰撞。碰撞分为三种情况，分别设定目标值：(a)直接碰撞（目标函数为$产生碰撞的成本+两车距离$），(b)诱导碰撞（目标函数为$BV产生碰撞的成本+AV产生碰撞的成本+两车距离$），(c)变换轨迹（目标函数为$AV转换轨道的距离+两车距离$）。在文中各个成本似乎是参数。
+
+DRL模型：deep Q-learning等针对离散情况的模型处理连续的驾驶行为不合适；文中未明确指定。
+
+评价：因为是magazine，写的比较模糊。1. 与AST两篇文章思想一样，但是考虑车辆与车辆的场景；2. 三种碰撞机制尤其是诱导碰撞比较有趣，其他文章如`Feng2019[NC]`中没有体现。
+
+![image-20230125122608512](mdPics/image-20230125122608512.png)
