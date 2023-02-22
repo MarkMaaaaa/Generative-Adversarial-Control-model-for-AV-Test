@@ -271,3 +271,159 @@ DRL模型：deep Q-learning等针对离散情况的模型处理连续的驾驶�
 评价：因为是magazine，写的比较模糊。1. 与AST两篇文章思想一样，但是考虑车辆与车辆的场景；2. 三种碰撞机制尤其是诱导碰撞比较有趣，其他文章如`Feng2019[NC]`中没有体现。
 
 ![image-20230125122608512](mdPics/image-20230125122608512.png)
+
+# 2022-02-07
+
+## 代码学习
+
+学习Keras写GAN，未来尝试复现henry的文章
+
+尝试用keras写简单的神经网络，看简单的GAN
+
+因为henry文章中有DRL解MDP，所以补了一下DRL相关知识
+
+# 2022-02-14
+
+## 把SUMO road的参数输入网络
+
+暂时没考虑匝道，所以重要参数只有速度上限和车道数量。
+
+```
+def train(self, epochs):
+    for epoch in range(epochs):
+    	speed, lane_num = get_road_data()
+	return 1
+
+def get_road_data(self):
+	speed = random.randint(70, 80)
+	lane_num = random.randint(1, 4)
+	return speed, lane_num
+```
+
+简单写了网络框架：
+
+```
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Feb 17 2023
+@author: Ke, Hang
+"""
+
+import keras
+import numpy as np
+import matplotlib.pyplot as plt
+from keras import layers, models
+
+
+class GAN():
+    def __init__(self):
+        self.road_dim = 2
+        self.traj_dim = 10
+        self.task_dim = 10
+        self.scen_dim = 100
+
+        self.discriminator = self.build_discriminator()
+        self.discriminator.compile(optimizer='adam', loss='mse')
+
+        self.generator = self.build_generator()
+
+        gan_input = layers.Input(shape=(self.road_dim, self.traj_dim, self.task_dim))
+        scenario = self.generator(gan_input)
+        validity = self.discriminator(scenario)
+        self.combined = models.Model(gan_input, validity)
+        self.combined.compile(loss='binary_crossentropy', optimizer='adam')
+
+    def build_generator(self):
+        model = models.Sequential()
+        model.add(layers.Dense(100, input_dim=self.road_dim + self.traj_dim + self.task_dim))
+        # todo
+        road = layers.Input(shape=(self.road_dim,))
+        trajectory = layers.Input(shape=(self.traj_dim,))
+        AV_task = layers.Input(shape=(self.task_dim,))
+        scenario = model([road, trajectory, AV_task]) # todo 处理多输入
+
+        return models.Model([road, trajectory, AV_task], scenario)
+
+    def build_discriminator(self):
+        validity = 1
+        # todo
+        scenario = layers.Input(shape=self.scen_dim)
+        return models.Model(scenario, validity)
+
+    def train(self, epochs):
+        for epoch in range(epochs):
+            speed, lane_num = get_road_data()
+        return 1
+
+    def get_road_data(self):
+        speed = random.randint(70, 80)
+        lane_num = random.randint(1, 4)
+        return speed, lane_num
+
+```
+
+
+
+## 把road画出来
+
+先用python生成给定参数的edge, node文件，再由netcover生成net文件，用sumo打开得到路径图。
+
+文件生成代码：
+
+```
+import random
+
+nodes_num = 2
+road_length = 1000
+speed = random.randint(70, 80)
+lane_num = random.randint(1, 4)
+
+# 生成Node文件, 从(0,0)开始生成的
+with open('example.nod.xml', 'w') as file:
+    file.write('<nodes> \n\n')
+    file.write('\t<node id="node%d" x="%d" y="%d" type="priority" /> \n' % (0, 0, 0))
+    file.write('\t<node id="node%d" x="%d" y="%d" type="priority" /> \n' % (1, 0 + road_length, 0))
+    file.write('\n</nodes>')
+
+# 生成edge文件
+with open('example.edg.xml', 'w') as file:
+    file.write('<edges> \n\n')
+    file.write(
+        '\t<edge id="edge%d" from="node%d" to="node%d" priority="75" numLanes="%d" speed="%d"/> \n'
+        % (0, 0, 1, 5, speed))
+    file.write('\n</edges>')
+
+# 生成route文件
+with open('example.rou.xml', 'w') as file:
+    file.write('<routes> \n\n')
+    # 第一种车型：普通BV
+    file.write(
+        '\t<vType id="type%d" accel="%.1f" decel="%.1f" sigma="%.1f" length="%d" color="1,0,0"/>\n'
+        % (0, 0.8, 4.5, 0.5, 5))
+    # 第二种车型：pov
+    file.write(
+        '\t<vType id="type%d" accel="%.1f" decel="%.1f" sigma="%.1f" length="%d" color="0,1,0"/>\n\n'
+        % (1, 0.8, 4.5, 0.5, 5))
+    # 路径
+    file.write('\t<route id="route0" edges="edge0"/>\n\n')
+    # 车辆
+    file.write(
+        '\t<vehicle id="%d" type="type%d" route="route0" depart="0" departLane="%d" departPos="%d"/>\n'
+        % (0, 0, 0, 100))
+    file.write(
+        '\t<vehicle id="%d" type="type%d" route="route0" depart="0" departLane="%d" departPos="%d"/>\n'
+        % (2, 1, 1, 50))
+    file.write('\n</routes>')
+```
+
+路径图展示（5车道）：
+
+![image-20230221102209655](mdPics/image-20230221102209655.png)
+
+## GAN框架输入trajectory是否合理？
+
+![image-20230222105424780](mdPics/image-20230222105424780.png)
+
+## 碰撞场景案例
+
+https://youtube.com/shorts/vpvDH-WLB9Q?feature=share
