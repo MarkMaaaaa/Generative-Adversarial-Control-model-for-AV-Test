@@ -545,3 +545,11 @@ output_data()
 ````
 
 剩余时间继续学习神经网络/traffic flow。
+
+# 2022-03-11
+
+## re-write the framework of the algorithm
+
+![framework](mdPics/framework.png)
+
+## update the code of the simulation
