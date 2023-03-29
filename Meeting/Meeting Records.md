@@ -552,4 +552,39 @@ output_data()
 
 ![framework](mdPics/framework.png)
 
-## update the code of the simulation
+# 2023-03-23
+
+## use TTC to test collision
+
+time-to-collision
+
+![image-20230328084915797](mdPics/image-20230328084915797.png)
+
+if $TTC_i \leq fixed-value$, vehicle $i$ is colliding with vehicle $i-1$.
+
+## use data in OpenACC
+
+1. download trajectory data in OpenACC
+
+| Data Set      | Number of Vehicle(traj) | ACC&manually driving |
+| ------------- | ----------------------- | -------------------- |
+| AstaZero      | 2-3                     | ACC/manually driving |
+| Casale        | 2-3                     | ACC                  |
+| **Cherasco**  | 2-3                     | mixed                |
+| **Vicolungo** | 5                       | ACC/manual/mixed     |
+| ZalaZone      | 10                      | ACC                  |
+
+- Cher-JRC_240918_rec1_part1_highway		4e4	3
+- JRC-Cher_3008_rec2_part2			2e4	2
+- JRC-Cher_240918_rec1_part2_highway		3e4	2
+- JRC-Cher_240918_rec2_highway		2e4	2
+
+- JRC-VC_260219_part4_highway		5e3	5
+- VC-JRC_280219_part2			6e3	5
+- VC-JRC_280219_part3			7e3	5
+
+2. Use manual trajectory as leading vehicle's trajectory. 
+
+3. compare the leading vehicle with the following vehicle/our acc vehicle with AV in the data set
+
+Results show that, at first acc will have a high deceleration, because the distance between the leading vehicle and av is small (30m). After the distance enlarged to 100m, delta-v will be close to 0.
