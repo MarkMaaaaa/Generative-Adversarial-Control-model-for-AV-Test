@@ -587,4 +587,36 @@ if $TTC_i \leq fixed-value$, vehicle $i$ is colliding with vehicle $i-1$.
 
 3. compare the leading vehicle with the following vehicle/our acc vehicle with AV in the data set
 
-Results show that, at first acc will have a high deceleration, because the distance between the leading vehicle and av is small (30m). After the distance enlarged to 100m, delta-v will be close to 0.
+# 2023-0329
+
+## update figures
+
+see Figs.pptx.
+
+## code a simple framework
+
+use tensorflow+keras to implement the Generator-SimuNet.
+
+details see Figs.pptx and GS.py.
+
+**questions(improvement): ** 
+
+1. how to input an initial state to RNN in keras.sequential model?
+
+2. is it too slow? 
+
+combine multiple time steps in one cell
+
+3. extend to real data? (can't train if there is no a sequence of ttc data)
+
+rarely appear
+
+4. how to use the character (simunet only need to be precise around dangerous scenarios) of our problem?
+
+- in the labels (simulator results), if some ttcs are bigger than a safe value, set a big value to them.(piecewise) add dense(relu) after rnn?
+
+- in the first few epochs, train Generator more frequently.
+
+5. how to add ACC (AV's model) into RNN?
+
+in each cell, use a0,v0,v1,d to obtain a1, and then add a1 to RNN (resNet).
