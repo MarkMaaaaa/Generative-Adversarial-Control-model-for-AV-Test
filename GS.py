@@ -16,13 +16,14 @@ class Generator():
             x: distance between leading car and AV (m)
             v0: v for leading car (m/s)
             v1: v for AV (m/s)
-            a0, t: a for leading car in the following t time (m/s^2, s)
+            a0, t: a for leading car in t time (m/s^2, s)
     """
 
     def __init__(self):
         self.net = self.build_net()
-        self.loss = tf.keras.losses.MeanSquaredError()
-        self.trainer = tf.keras.optimizers.SGD()
+        self.loss = tf.keras.losses.MeanSquaredError()  # binary crossentropy?
+        # self.trainer = tf.keras.optimizers.SGD()
+        self.trainer = tf.keras.optimizers.Adam(0.0002, 0.5)
         self.input_size = 10  # size for input random variable
 
     class FinalLayer(tf.keras.Model):
@@ -37,7 +38,8 @@ class Generator():
             # 0 <= t <= 5 (s)
 
         def call(self, inputs):
-            return tf.round(inputs * self.weight + self.bias)
+            inputs = inputs * self.weight + self.bias
+            return tf.round(inputs * 100) / 100
 
     def build_net(self):
         net = tf.keras.models.Sequential([
@@ -109,7 +111,8 @@ class Simulator():
         if (0 <= ttc <= 1):
             print("crash at time step: %.2f" % (step / 10))
             if (exit):
-                self.TTCs.append(0)
+                while self.TTCs.__len__() < int(round(self.T / self.Tstep)):
+                    self.TTCs.append(0)
                 return True
         self.TTCs.append(ttc)
         return False
@@ -121,6 +124,7 @@ class Simulator():
         self.d[1].append(0)
         self.v[1].append(self.v1)
         self.a[1].append(0)
+        self.crash_test(0)
 
     def simulate_in_stage(self, start_time, end_time, accelerate):
         for i in range(int(round(start_time / self.Tstep)), int(round(end_time / self.Tstep))):
@@ -137,24 +141,9 @@ class Simulator():
     def simulate(self):
         self.initial()
         if self.simulate_in_stage(self.Tstep, self.t, self.a0):
-            return min(self.TTCs)
+            return self.TTCs
         self.simulate_in_stage(self.t, self.T, 0)
-        return min(self.TTCs)
-
-
-class RNNModel(tf.keras.layers.Layer):
-    def __init__(self, rnn_layer, **kwargs):
-        super(RNNModel, self).__init__(**kwargs)
-        self.rnn = rnn_layer
-        self.dense = tf.keras.layers.Dense(1)  # output ttc in each t
-
-    def call(self, inputs, state):
-        Y, state = self.rnn(inputs, state)
-        output = self.dense(tf.reshape(Y, (-1, Y.shape[-1])))
-        return output, state
-
-    def begin_state(self, *args, **kwargs):
-        return self.rnn.cell.get_initial_state(*args, **kwargs)
+        return self.TTCs
 
 
 class SimuNet():
@@ -167,24 +156,30 @@ class SimuNet():
     def __init__(self):
         self.net = self.build_net()
         self.loss = tf.keras.losses.MeanSquaredError()
-        self.trainer = tf.keras.optimizers.SGD()
+        # self.trainer = tf.keras.optimizers.SGD()
+        self.trainer = tf.keras.optimizers.Adam(0.0002, 0.5)
 
     def build_net(self):
-        num_hiddens = 3
-        rnn_cell = tf.keras.layers.SimpleRNNCell(num_hiddens,
-                                                 kernel_initializer='glorot_uniform')
-        rnn_layer = tf.keras.layers.RNN(rnn_cell, time_major=True,
-                                        return_sequences=True, return_state=True)
-        # net = RNNModel(rnn_layer)  # input a0
-        net = tf.keras.models.Sequential([
-            RNNModel(rnn_layer)
-        ])
-        return net
+        time_steps = 100  # how many time steps in simulation
+        input_size = 1  # how many inputs in each time step
+        units = 3 # the dimonsion of each state
+        output_size = time_steps
+
+        inputs = tf.keras.layers.Input((time_steps, input_size))
+        # initial state as Keras Input
+        initial_state = tf.keras.layers.Input((units,))
+        rnn = tf.keras.layers.SimpleRNN(units)
+        hidden = rnn(inputs, initial_state=initial_state)
+        output = tf.keras.layers.Dense(output_size, activation='relu')(hidden)
+        model = tf.keras.models.Model([inputs, initial_state], output)
+
+        # print(model.summary())
+        return model
 
     def trans2inputs(self, scenario):
-        Xt = tf.reshape(scenario[0, 4:5], (1, 1, -1))  # batch size = 1
-        Xt = tf.tile(Xt, [100, 1, 1])  # number of step (equals to simulation T/Tstep)
-        begin_state = tf.reshape(scenario[0, :3], (1, -1))
+        Xt = tf.reshape(scenario[:, 4:5], (1, 1, -1))  # batch size = 1
+        Xt = tf.tile(Xt, [1, 100, 1])  # number of step (equals to simulation T/Tstep)
+        begin_state = tf.reshape(scenario[:, :3], (1, -1))
         return [Xt, begin_state]
 
 
@@ -194,13 +189,14 @@ def train(epochs, gen, simu_net):
     # The generator takes noise as input and generates scenarios
     gen_in = tf.keras.layers.Input(shape=(gen.input_size,))
     gen_out = gen.net(gen_in)
+    Xts, begin_states = simu_net.trans2inputs(gen_out)
     # For the combined model we will only train the simu net
     # after the simu_net has been compiled it is still trained during simu_net.train_on_batch but since it's set to non-trainable before the combined model is compiled it's not trained during combined.train_on_batch
     simu_net.net.trainable = False
     # The simu net takes generated scenarios as input and determines risk level for this scenario
-    risk = simu_net.net(gen_out)
+    risks = simu_net.net([Xts, begin_states])
     # The combined model  (stacked generator and simu net)
-    combined = tf.keras.models.Model(gen_in, risk)
+    combined = tf.keras.models.Model(gen_in, risks)
     combined.compile(loss=gen.loss, optimizer=gen.trainer)
 
     print("build complete!")
@@ -211,10 +207,14 @@ def train(epochs, gen, simu_net):
         scenario = gen.net(inputs)
         # train the simu net, make ttc close to real ttc (from simulator)
         sim = Simulator(scenario)
-        risk = sim.simulate(scenario)
-        d_loss = simu_net.net.train_on_batch(scenario, risk)
+        risk = np.array(sim.simulate()).reshape(1,-1)
+        Xt, begin_state = simu_net.trans2inputs(scenario)
+        # print(Xt.shape)
+        # print(begin_state.shape)
+        # print(risk.shape)
+        d_loss = simu_net.net.train_on_batch([Xt, begin_state], risk)
         # train the generator, make ttc close to 0
-        g_loss = self.combined.train_on_batch(inputs, np.zeros((batch_size, 1)))  # ?
+        g_loss = combined.train_on_batch(inputs, np.zeros((1, 1)))
         print("%d [D loss: %f, acc.: %.2f%%] [G loss: %f]" % (epoch, d_loss, g_loss))
 
 
@@ -231,16 +231,21 @@ def debug():
     sim = Simulator(scenario)
     ttc = sim.simulate()
     print("min ttc in simulator:")
-    print(ttc)
+    print(min(ttc))
+    print(ttc.__len__())
     simu_net = SimuNet()
     X, begin_state = simu_net.trans2inputs(scenario)
-    Y, new_state = simu_net.net([X, begin_state]) # error
+    print("scenario transfer:")
+    print(X.shape)
+    print(begin_state.shape)
+    Y = simu_net.net([X] + [begin_state])
     print("min ttc in simu-net:")
     print(float(tf.reduce_min(Y)))
+    print(Y.shape)
 
 
 if __name__ == '__main__':
-    debug()
-    # gen = Generator()
-    # simu_net = SimuNet()
-    # train(100, gen, simu_net)
+    # debug()
+    gen = Generator()
+    simu_net = SimuNet()
+    train(100, gen, simu_net)
