@@ -1,4 +1,4 @@
-""" Generator-SimuNet network for generating testing scenarios for AV test
+""" Generator-SimuNet network to generate testing scenarios for AV test
     """
 
 import os
@@ -6,7 +6,6 @@ import tensorflow as tf
 import numpy as np
 from d2l import tensorflow as d2l
 import sys
-
 # from tensorflow.python.framework.ops import disable_eager_execution
 
 # disable_eager_execution()
@@ -30,7 +29,7 @@ class Generator():
         self.trainer = tf.keras.optimizers.Adam(0.0002, 0.5)
         self.input_size = 2  # size for input random variable
 
-    class FinalLayer(tf.keras.Model):
+    class MyLayer(tf.keras.Model):
         def __init__(self):
             super().__init__()
             self.weight = tf.constant([10, 10, 10, 6, 2], shape=[1, 5], dtype=float)
@@ -43,7 +42,7 @@ class Generator():
 
         def call(self, inputs):
             inputs = inputs * self.weight + self.bias
-            # inputs_1 = tf.round(inputs[:, :4] * 100) / 100
+            # inputs_1 = tf.round(inputs[:, :4] * 100) / 100  TODO: kerastensor can't pass tf.round
             # inputs_2 = tf.round(inputs[:, 4:5] * 10) / 10
             # return tf.concat([inputs_1, inputs_2], 1)
             return inputs
@@ -54,7 +53,7 @@ class Generator():
             tf.keras.layers.Dense(16, activation='relu', name="D1"),
             tf.keras.layers.Dense(64, activation='relu', name="D2"),
             tf.keras.layers.Dense(5, activation='sigmoid', name="D3"),
-            self.FinalLayer()  # [x, v0, v1, a0, t]
+            self.MyLayer()  # [x, v0, v1, a0, t]
         ])
         return net
 
@@ -83,7 +82,7 @@ class Simulator():
         self.v0 = float(inputs[0, 1])
         self.v1 = float(inputs[0, 2])
         self.a0 = float(inputs[0, 3])
-        self.t = float(inputs[0, 4])
+        self.t = 2  # float(inputs[0, 4]) TODO default t=2
         # record info
         self.a = [[], []]
         self.v = [[], []]
@@ -116,8 +115,8 @@ class Simulator():
             ttc = round(del_d / del_v, 2)
             ttc = min(self.M, ttc)
         # TTC collision test
-        if (0 <= ttc <= 1):
-            print("crash at time step: %.2f" % (step / 10))
+        if (0 <= ttc <= 1):  # TODO setting collision standard
+            # print("crash at time step: %.2f" % (step / 10))
             if (exit):
                 while self.TTCs.__len__() < int(round(self.T / self.Tstep)):
                     self.TTCs.append(0)
@@ -167,40 +166,42 @@ class SimuNet():
         # self.trainer = tf.keras.optimizers.SGD()
         self.trainer = tf.keras.optimizers.Adam(0.0002, 0.5)
 
+    # using functional API to build RNN network
     def build_net(self):
         time_steps = 40  # how many time steps in simulation
         input_size = 1  # how many inputs in each time step
         units = 3  # the dimonsion of each state
-        output_size = time_steps
 
         inputs = tf.keras.layers.Input(shape=(time_steps, input_size), batch_size=1)
-        # initial state as Keras Input
         initial_state = tf.keras.layers.Input(shape=(units,), batch_size=1)
-        rnn = tf.keras.layers.SimpleRNN(units)
+        rnn = tf.keras.layers.SimpleRNN(units, return_sequences=True, return_state=False)
         hidden = rnn(inputs, initial_state=initial_state)
-        output = tf.keras.layers.Dense(output_size, activation='relu')(hidden)
+        hidden = tf.reshape(hidden, (-1, hidden.shape[-1]))  # hidden is (40,3)
+        output = tf.keras.layers.Dense(1, activation='relu')(hidden)  # output (40,1), where 1 comes from 3
+        output = tf.reshape(output, (1, -1, 1))  # change to (1,40,3)
         model = tf.keras.models.Model([inputs, initial_state], output)
 
-        # print(model.summary())
+        # model.summary()
         return model
 
+    # test the accuracy of simu net
     def prediction_gap(sellf, y_true, y_pred):
         reduce = tf.abs(y_true - y_pred)
         gap = reduce / y_true
         gap = tf.reduce_mean(gap)
         return gap
 
+    # transfer output in generator to input and initial state
     def trans2inputs(self, scenario):
         # tmp = np.zeros((scenario.shape[0], 100, 1))
         # for i in range(scenario.shape[0]):
         #     for j in range(int(float(scenario[i, 4]) * 10)):
         #         tmp[i, j] = float(scenario[i, 3])
-
         # Xt = tf.convert_to_tensor(tmp)
 
         Xt = tf.reshape(scenario[:, 3:4], (-1, 1, 1))
-        # Xt = tf.tile(Xt, [1, int(float(scenario[0, 4]) * 10), 1])  # number of step (equals to simulation T/Tstep)
-        Xt = tf.tile(Xt, [1, 20, 1])
+        # Xt = tf.tile(Xt, [1, int(float(scenario[0, 4]) * 10), 1])  # TODO: keras tensor can't get specific value
+        Xt = tf.tile(Xt, [1, 20, 1])  # default t=2
         Xt = tf.concat([Xt, tf.zeros((1, 20, 1))], 1)
         begin_state = tf.reshape(scenario[:, :3], (-1, 3))
         return [Xt, begin_state]
@@ -210,24 +211,26 @@ def train(epochs, sample_interval, gen, simu_net, combined):
     for epoch in range(epochs):
         # generate random inputs
         inputs = tf.random.normal([1, gen.input_size], mean=0.0, stddev=1.0, dtype=tf.float32)
-        # print(inputs)
         scenario = gen.net(inputs)
-        # print(scenario)
         # train the simu net, make ttc close to real ttc (from simulator)
         sim = Simulator(scenario)
         risk = np.array(sim.simulate()).reshape(1, -1)
-        # print(risk)
         Xt, begin_state = simu_net.trans2inputs(scenario)
-        # print(Xt)
-        # print(begin_state)
         d_loss = simu_net.net.train_on_batch([Xt, begin_state], risk)
         # train the generator, make ttc close to 0
         g_loss = combined.train_on_batch(inputs, np.zeros((1, 1)))
-        print("%d [D loss: %f, gap: %.2f%%] [G loss: %f]" % (epoch, d_loss[0], 100 * d_loss[1], g_loss))
 
         if epoch % sample_interval == 0:
+            min_ttc = risk.min()
+            print("%d [D loss: %f, gap: %.2f%%] [G loss: %f, risk: %.2f]" % (
+            epoch, d_loss[0], 100 * d_loss[1], g_loss, min_ttc))
+            with open('train_log.txt', 'a') as f:
+                f.write("%d [D loss: %f, gap: %.2f%%] [G loss: %f, risk: %.2f]\n" % (
+                epoch, d_loss[0], 100 * d_loss[1], g_loss, min_ttc))
             simu_net.net.save('./simu_net.h5')
+            simu_net.net.save('./simu_net_weight.h5')
             combined.save('./combined_model.h5')
+            combined.save('./combined_model_weight.h5')
 
     print("train complete!")
 
@@ -238,75 +241,52 @@ def build_GS_model(gen, simu_net):
     # The generator takes noise as input and generates scenarios
     gen_in = tf.keras.layers.Input(shape=(gen.input_size,), batch_size=1)
     gen_out = gen.net(gen_in)
-    Xts, begin_states = simu_net.trans2inputs(gen_out)
+    Xt, begin_state = simu_net.trans2inputs(gen_out)
     # For the combined model we will only train the simu net
     simu_net.net.trainable = False
     # The simu net takes generated scenarios as input and determines risk level for this scenario
-    risks = simu_net.net([Xts, begin_states])
-    # The combined model  (stacked generator and simu net)
-    combined = tf.keras.models.Model(gen_in, risks)
+    risk = tf.reduce_min(simu_net.net([Xt, begin_state]), axis=1)
+    # The combined model
+    combined = tf.keras.models.Model(gen_in, risk)
     combined.compile(loss=gen.loss, optimizer=gen.trainer)
 
+    # combined.summary()
     print("build complete!")
 
     return combined
 
 
 def generate_scenario():
-    gen = tf.keras.models.load_model('./combined_model.h5')
+    combined = tf.keras.models.load_model('./combined_model.h5', custom_objects={'MyLayer': Generator.MyLayer})
+    gen = tf.keras.Model(inputs=combined.layers[1].input, outputs=combined.layers[1].output)
     inputs = tf.random.normal([1, 2], mean=0.0, stddev=1.0, dtype=tf.float32)
-    out = gen(inputs)
-    print(out)
+    scenario = gen(inputs)
+    print(scenario)
 
 
 def cal_risk():
-    scenario = tf.constant([10, 20, 24, -2, 2], shape=[1, 5], dtype=float)
+    scenario = tf.constant([10, 23, 27, -1, 2], shape=[1, 5], dtype=float)
 
     sim = Simulator(scenario)
     ttc = sim.simulate()
     print("ttc in simulator:")
     print(ttc)
 
-    sn = SimuNet()
-    simu_net = tf.keras.models.load_model('./simu_net.h5', custom_objects={'prediction_gap': sn.prediction_gap})
-    X, begin_state = sn.trans2inputs(scenario)
+    simu_net = tf.keras.models.load_model('./simu_net.h5', custom_objects={'prediction_gap': SimuNet.prediction_gap})
+    X, begin_state = SimuNet.trans2inputs(None, scenario)
     Y = simu_net([X, begin_state])
     print("ttc in simu-net:")
     print(Y)
 
-
-def debug():
-    # inputs = tf.random.normal([1, 10], mean=0.0, stddev=1.0, dtype=tf.float32)
-    inputs = tf.constant(range(2), shape=[1, 2], dtype=float)
-    print("input:")
-    print(inputs)
-    gen = Generator()
-    scenario = gen.net(inputs)
-    # scenario = tf.constant([10, 20, 25, -1, 5], shape=[1, 5], dtype=float)
-    print("scenario:")
-    print(scenario)
-    sim = Simulator(scenario)
-    ttc = sim.simulate()
-    print("min ttc in simulator:")
-    print(min(ttc))
-    print(ttc.__len__())
-    simu_net = SimuNet()
-    X, begin_state = simu_net.trans2inputs(scenario)
-    print("scenario transfer:")
-    print(X.shape)
-    print(begin_state.shape)
-    Y = simu_net.net([X] + [begin_state])
-    print("min ttc in simu-net:")
-    print(float(tf.reduce_min(Y)))
-    print(Y.shape)
+    gap = SimuNet.prediction_gap(None, ttc, Y)
+    print(gap)
 
 
 if __name__ == '__main__':
-    # debug()
-
-    gen = Generator()
-    simu_net = SimuNet()
-    combined = build_GS_model(gen, simu_net)
-    train(10000, 100, gen, simu_net, combined)
+    # gen = Generator()
+    # simu_net = SimuNet()
+    # combined = build_GS_model(gen, simu_net)
+    # train(100000, 100, gen, simu_net, combined)
 
     # cal_risk()
+    generate_scenario()
