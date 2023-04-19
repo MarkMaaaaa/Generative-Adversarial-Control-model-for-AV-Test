@@ -620,3 +620,19 @@ rarely appear
 5. how to add ACC (AV's model) into RNN?
 
 in each cell, use a0,v0,v1,d to obtain a1, and then add a1 to RNN (resNet).
+
+# 2023-0404
+
+## train GS
+
+start training GS model
+
+use a set of ttcs to train simu net and use min ttc to train combined model
+
+# 2023-0411
+
+## train GS
+
+change RNN to MLP
+
+now GS can get a good result in car following model. dangerous scenario is [10, 20, 30, -3, 1].
